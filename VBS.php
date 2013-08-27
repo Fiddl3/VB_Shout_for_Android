@@ -453,6 +453,7 @@ class VBS
          if ( $shout['userid'] == -1 )
             $nShout['type'] = 'system';
 
+
          ///////////////////////////////////////
          // $nShout['message'] = $nShout['msg'];
          ///////////////////////////////////////
