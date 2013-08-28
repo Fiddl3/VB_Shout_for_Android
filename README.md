@@ -23,7 +23,7 @@ PHP/Server side implementation source code can be found in this repository, Andr
 
 How to install/use?
 -------------------
-#### Developers/Admins
+##### Developers/Admins
 ....If you want to enable in app ShoutBox usage on your site, you have to place php file [name soon] in your forum root directory... That's it.
 
 ##### Users
