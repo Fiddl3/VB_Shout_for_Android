@@ -37,6 +37,10 @@ When I can get it?
 For now access to application have only few users, because it's in development.
 
 Later application will be available in Google Play Store...
+
+XXX
+---
+Sorry for ma english....
      
 .
 
