@@ -24,11 +24,11 @@ PHP/Server side implementation source code can be found in this repository, Andr
 How to install/use?
 -------------------
 ### Developers/Admins
-        If you want to enable in app ShoutBox usage on your site, you have to place php file [name soon] in your forum root directory... That's it.
+ If you want to enable in app ShoutBox usage on your site, you have to place php file [name soon] in your forum root directory... That's it.
 
 ### Users
-        if you want to use vBShout in Android you need to download and install Android Application, then follow in app instructions.
-        If your favorite site Admin placed php bridge on server, you're got do go, otherwise you need to ask him about it. App will automatically check if file exist on server.
+  if you want to use vBShout in Android you need to download and install Android Application, then follow in app instructions.
+   If your favorite site Admin placed php bridge on server, you're got do go, otherwise you need to ask him about it. App will automatically check if file exist on server.
 
 
 When I can get it?
