@@ -5,9 +5,10 @@
  * Date: 27.08.13
  * Time: 16:39
  * To change this template use File | Settings | File Templates.
+ *
+ * TODO: delete info handler in apk
  */
 
-//TODO: delete info handler in apk
 if(!defined( 'DIR' )) define('DIR', (($cwd = getcwd()) ? $cwd : '.'));
 
 
@@ -22,12 +23,12 @@ class Output
    public static function error( $code )
    {
       $error = array('code' => $code /*, 'msg' => self::encode($text)*/);
-      self::output( 'error', $error );
-      self::output( 'return', false );
+      self::put( 'error', $error );
+      self::put( 'return', false );
       self::render();
    }
 
-   public static function output( $key, $text )
+   public static function put( $key, $text )
    {
       self::$_output[$key] = $text;
    }
@@ -94,11 +95,6 @@ class Output
             $source[$key] = self::encode( $source[$key], false );
    }
 
-   public static function rturn( $bool )
-   {
-
-   }
-
 }
 
 class Router
@@ -159,26 +155,15 @@ class VBS
    const ERR_VB_USER_NOT_EXIST      = 17;
 
 
-   private static $_vb;
    private static $_gpc;
    private static $_user;
+   private static $_vb;
 
-   private static $_instance;
    private static $_chatroom;
+   private static $_instance;
 
    private static $_chatrooms;
    private static $_instances;
-
-   private static $_actual = false;
-
-
-   // TODO: Move code out
-   // preInit
-   // includes
-   // GPC
-   // init
-   // router
-   // render
 
 
    public static function init( vB_Registry $vb )
@@ -393,7 +378,7 @@ class VBS
 
    public static function getRoomList()
    {
-      require(DIR . '/includes/html_color_names.php');
+      require_once(DIR . '/includes/html_color_names.php');
       $rList = array();
 
       //Main instance rooms
@@ -466,7 +451,7 @@ class VBS
         )
         AND vbshout.chatroomid = " . intval( self::getChatRoomId() )
 
-                                                  . (is_null( $limit ) ? " AND vbshout.dateline > " . (self::$_vb->GPC['lastupdate']) : '') .
+                                                  . (is_null($limit) ? " AND vbshout.dateline > " . ((int)self::$_gpc['lastupdate']) : '') .
 
                                                   ' AND (
                                                      vbshout.userid IN(-1, ' . self::$_user['userid'] . ') OR
@@ -485,7 +470,7 @@ class VBS
       if ( !self::$_vb->db->num_rows( $fetchQ ) )
          return null;
 
-      require(DIR . '/includes/html_color_names.php');
+      require_once(DIR . '/includes/html_color_names.php');
 
       $list = array();
       while ( $shout = self::$_vb->db->fetch_array( $fetchQ ) ) {
@@ -573,15 +558,57 @@ class VBS
       return array_reverse( $list );
    }
 
+
    public static function devInfo()
    {
-      Output::output( 'VBVersion',  self::$_vb->versionnumber );
-      Output::output( 'VBSVersion', self::VERSION );
-      Output::output( 'version',    VBSHOUT::$version );
-      Output::output( 'versionNo',  VBSHOUT::$versionnumber );
-      Output::output( 'isPro',      VBSHOUT::$isPro );
+      Output::put( 'VBVersion',  self::$_vb->versionnumber );
+      Output::put( 'VBSVersion', self::VERSION );
+      Output::put( 'version',    VBSHOUT::$version );
+      Output::put( 'versionNo',  VBSHOUT::$versionnumber );
+      Output::put( 'isPro',      VBSHOUT::$isPro );
 
       Output::render();
+   }
+
+   public static function instanceInfo()
+   {
+      if ( is_null( self::getInstanceId() ) )
+         Output::error( self::ERR_VBS_NOT_INITIALIZED );
+
+      Output::put( 'instance', self::getInstanceInfo() );
+
+      self::userInfo();
+      self::roomSync();
+
+      Output::put( 'return', (bool)self::$_instance['permissions_parsed']['canviewshoutbox'] );
+   }
+
+   public static function userInfo()
+   {
+      if ( is_null( self::getInstanceId() ) )
+         Output::error( self::ERR_VBS_NOT_INITIALIZED );
+
+      $info = self::getUserInfo();
+      if ( is_null( $info ) )
+         Output::error( self::ERR_VB_USER_NOT_EXIST );
+
+      Output::put( 'user', $info );
+
+      Output::put( 'return', (bool)$info['userid'] );
+   }
+
+
+   public static function roomSync()
+   {
+      if ( is_null( self::getInstanceId() ) )
+         Output::error( self::ERR_VBS_NOT_INITIALIZED );
+
+      $list = self::getRoomList();
+
+      if ( is_null( $list ) )
+         Output::error( self::ERR_NO_ROOM_AVAILABLE );
+
+      Output::put( 'rooms', $list );
    }
 
    public static function shoutSync()
@@ -589,7 +616,7 @@ class VBS
       if ( is_null( self::getInstanceId() ) )
          Output::error( self::ERR_VBS_NOT_INITIALIZED );
 
-      Output::output( 'lastSync', self::getAop() ); //TODO: change "lastup" to lastSync in apk
+      Output::put( 'lastSync', self::getAop() ); //TODO: change "lastup" to lastSync in apk
 
       $tmp = self::getShoutList();
 
@@ -598,7 +625,7 @@ class VBS
       elseif ( !$tmp )
          Output::error( self::ERR_ERROR_WHILE_FETCHING );
       else
-         Output::output( 'shouts', $tmp );
+         Output::put( 'shouts', $tmp );
    }
 
    public static function shoutReSync()
@@ -606,7 +633,7 @@ class VBS
       if ( is_null( self::getInstanceId() ) )
          Output::error( self::ERR_VBS_NOT_INITIALIZED );
 
-      Output::output( 'lastReSync', self::getAop() ); //TODO: change "lastbu" to lastReSync in apk
+      Output::put( 'lastReSync', self::getAop() ); //TODO: change "lastbu" to lastReSync in apk
 
       self::instanceInfo();
 
@@ -622,47 +649,191 @@ class VBS
       if ( empty($list) )
          Output::error( self::ERR_ERROR_WHILE_FETCHING );
       else
-         Output::output( 'shouts', $list );
+         Output::put( 'shouts', $list );
    }
 
-   public static function roomSync()
+
+   public static function shoutSave()
    {
       if ( is_null( self::getInstanceId() ) )
          Output::error( self::ERR_VBS_NOT_INITIALIZED );
 
-      $list = self::getRoomList();
+      $type = (VBSHOUT::$shouttypes[self::$_gpc['type']] ? self::$_gpc['type'] : 'shout');
 
-      if ( is_null( $list ) )
-         Output::error( self::ERR_NO_ROOM_AVAILABLE );
+      $nShout = VBSHOUT::datamanager_init( 'Shout', self::$_vb, ERRTYPE_ARRAY );
 
-      Output::output( 'rooms', $list );
+      $nShout->set_info( 'instance', self::$_instance );
+
+      if ( self::$_gpc['shoutid'] ) {
+         if ( !$shout = self::$_vb->db->query_first_slave( 'SELECT * FROM ' . TABLE_PREFIX . 'dbtech_vbshout_shout WHERE shoutid = ' . self::$_gpc['shoutid'] ) )
+            Output::error( self::ERR_SHOUT_NOT_EXIST );
+
+         $nShout->set_existing( $shout );
+         $nShout->set( 'message', Output::encode( self::$_gpc['message'], false ) );
+      }
+      else {
+         $nShout->set( 'id', self::$_gpc['pmuserid'] );
+         $nShout->set( 'message', Output::encode( self::$_gpc['message'], false ) );
+         $nShout->set( 'type', VBSHOUT::$shouttypes[$type] );
+         $nShout->set( 'instanceid', (!is_null( self::getChatRoomId() ) ? self::$_chatroom['instanceid'] : self::getInstanceId()) );
+         $nShout->set( 'chatroomid', self::getChatRoomId() );
+      }
+
+      require_once(DIR . '/includes/class_bbcode.php');
+
+      VBSHOUT::$tag_list = fetch_tag_list( '', true );
+
+      $nShout->save();
+
+      if ( !empty($nShout->errors) )
+         Output::error( self::ERR_ERROR_WHILE_SAVING );
+      // foreach ( $nShout->errors as $e ) self::info( $e );
+
+
+      if ( $type == 'pm' )
+         VBSHOUT::set_aop( 'pm_' . self::$_gpc['pmuserid'] . '_', self::getInstanceId(), false );
+
+      if ( self::getChatRoomId() )
+         VBSHOUT::set_aop( 'chatroom_' . self::getChatRoomId() . '_', self::getInstanceId() );
+
+      VBSHOUT::set_aop( 'shouts', self::getInstanceId() );
+
+      Output::put( 'return', true );
    }
 
-   public static function userInfo()
+   public static function shoutDelete()
    {
       if ( is_null( self::getInstanceId() ) )
          Output::error( self::ERR_VBS_NOT_INITIALIZED );
 
-      $info = self::getUserInfo();
-      if ( is_null( $info ) )
-         Output::error( self::ERR_VB_USER_NOT_EXIST );
+      $nShout = VBSHOUT::datamanager_init( 'Shout', self::$_vb, ERRTYPE_ARRAY );
+      $nShout->set_info( 'instance', self::$_instance );
 
-      Output::output( 'user', $info );
+      if ( !self::$_gpc['shoutid'] )
+         Output::error( self::ERR_SHOUT_NOT_EXIST );
 
-      Output::output( 'return', (bool)$info['userid'] );
-   }
+      if ( !$shout = self::$_vb->db->query_first_slave( 'SELECT * FROM ' . TABLE_PREFIX . 'dbtech_vbshout_shout WHERE shoutid = ' . self::$_gpc['shoutid'] ) )
+         Output::error( self::ERR_SHOUT_NOT_EXIST );
 
-   public static function instanceInfo()
-   {
-      if ( is_null( self::getInstanceId() ) )
-         Output::error( self::ERR_VBS_NOT_INITIALIZED );
+      $nShout->set_existing( $shout );
 
-      Output::output( 'instance', self::getInstanceInfo() );
+      if ( $flag = $nShout->delete() ) {
+         if ( self::getChatRoomId() )
+            VBSHOUT::set_aop( 'chatroom_' . self::getChatRoomId() . '_', self::getInstanceId() );
+         VBSHOUT::set_aop( 'shouts', self::getInstanceId() );
+      }
 
-      self::userInfo();
-      self::roomSync();
+      Output::put( 'return', (bool)$flag );
 
-      Output::output( 'return', (bool)self::$_instance['permissions_parsed']['canviewshoutbox'] );
    }
 
 }
+
+
+function userLogIn( array $data )
+{
+   global $vbulletin;
+   require_once(DIR . '/includes/functions_login.php');
+
+   Output::encodeArray( $data, array('username') );
+
+   if ( verify_strike_status( $data['username'], true ) === false )
+      Output::error( VBS::ERR_LOGIN_ERROR_TRY_LATER );
+
+   if ( !verify_authentication( $data['username'], null, $data['md5password'], $data['md5password'], $data['cookieuser'], true ) ) {
+      exec_strike_user( $data['username'] );
+
+      Output::error( VBS::ERR_LOGIN_ERROR_WRONG_DATA );
+   }
+
+   $vbulletin->session->created = false;
+
+   exec_unstrike_user( $data['username'] );
+   process_new_login( $data['logintype'], $data['cookieuser'], null );
+
+   $user             = array();
+   $user['userid']   = $vbulletin->userinfo['userid'];
+   $user['username'] = $vbulletin->userinfo['username'];
+   $user['token']    = $vbulletin->userinfo['securitytoken'];
+
+   Output::put( 'return', true );
+   Output::put( 'user', $user );
+}
+
+function userLogOut( $token )
+{
+   global $vbulletin;
+   require_once(DIR . '/includes/functions_login.php');
+
+
+   if ( $vbulletin->userinfo['userid'] != 0 && !verify_security_token( $token, $vbulletin->userinfo['securitytoken_raw'] ) )
+      Output::error( VBS::ERR_LOGOUT_ERROR_BAD_TOKEN );
+
+   process_logout();
+
+   Output::put( 'return', true );
+}
+
+
+Output::put( 'id', (int)$_REQUEST['id'] );
+VBS::isInSync( $_REQUEST['lastupdate'], $_REQUEST['instance'], $_REQUEST['chatroom'], $_REQUEST['do'] == 'sync' );
+
+require_once('./global.php');
+global $vbulletin;
+
+$vbulletin->input->clean_array_gpc( 'r', array(
+                                              'token'       => TYPE_STR,
+                                              'id'          => TYPE_INT,
+                                              'do'          => TYPE_STR,
+                                              'action'      => TYPE_STR,
+                                              'order'       => TYPE_STR,
+                                              'lastupdate'  => TYPE_INT,
+                                              'fetchcount'  => TYPE_INT,
+                                              'chatroom'    => TYPE_STR,
+                                              'instance'    => TYPE_INT,
+
+                                              'username'    => TYPE_STR,
+                                              'md5password' => TYPE_STR,
+                                              'cookieuser'  => TYPE_BOOL,
+                                              'logintype'   => TYPE_STR,
+
+                                              'shoutid'     => TYPE_INT,
+                                              'message'     => TYPE_NOHTML,
+                                              'type'        => TYPE_STR,
+                                              'pmuserid'    => TYPE_UINT,
+                                              'chatroomid'  => TYPE_UINT,
+
+                                         ) );
+
+VBS::init( $vbulletin );
+
+$router = new Router();
+
+$router->addRoute( 'login', 'userLogIn', array($vbulletin->GPC) );
+
+$router->addRoute( 'logout', 'userLogOut', array($vbulletin->GPC['token']) );
+
+$router->addRoute( 'sync', 'VBS::postInit', array($vbulletin->GPC['instance'], $vbulletin->GPC['chatroom']) );
+$router->addRoute( 'sync', 'VBS::shoutSync' );
+
+$router->addRoute( 'reSync', 'VBS::postInit', array($vbulletin->GPC['instance'], $vbulletin->GPC['chatroom']) );
+$router->addRoute( 'reSync', 'VBS::shoutReSync' );
+
+$router->addRoute( 'save', 'VBS::postInit', array($vbulletin->GPC['instance'], $vbulletin->GPC['chatroom']) );
+$router->addRoute( 'save', 'VBS::shoutSave' );
+
+$router->addRoute( 'delete', 'VBS::postInit', array($vbulletin->GPC['instance'], $vbulletin->GPC['chatroom']) );
+$router->addRoute( 'delete', 'VBS::shoutDelete' );
+
+
+$router->execRoute($vbulletin->GPC['do']);
+
+Output::render();
+
+
+// preInit
+// includes
+// GPC
+// init
+// router
+// render
