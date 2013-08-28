@@ -774,6 +774,11 @@ function userLogOut( $token )
    Output::put( 'return', true );
 }
 
+/**************************************************
+ *
+ *                   TEST
+ *
+ **************************************************/
 
 Output::put( 'id', (int)$_REQUEST['id'] );
 VBS::isInSync( $_REQUEST['lastupdate'], $_REQUEST['instance'], $_REQUEST['chatroom'], $_REQUEST['do'] == 'sync' );
