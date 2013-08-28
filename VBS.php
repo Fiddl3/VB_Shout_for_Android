@@ -8,7 +8,7 @@
  */
 
 //TODO: delete info handler in apk
-(!defined( 'DIR' )) && define('DIR', (($cwd = getcwd()) ? $cwd : '.'));
+if(!defined( 'DIR' )) define('DIR', (($cwd = getcwd()) ? $cwd : '.'));
 
 
 /**
@@ -87,6 +87,13 @@ class Output
       return $val;
    }
 
+   public static function encodeArray( array &$source, array $keys )
+   {
+      foreach ( $keys as $key )
+         if ( isset($source[$key]) )
+            $source[$key] = self::encode( $source[$key], false );
+   }
+
    public static function rturn( $bool )
    {
 
@@ -130,12 +137,26 @@ class Router
 
 class VBS
 {
-   const VERSION            = '1.1.0';
-   const ERR_SB_NOT_EXIST   = 1;
-   const ERR_SB_NOT_ACTIVE  = 2;
-   const ERR_SB_USER_BANNED = 3;
-   const ERR_VB_USER_BANNED = 16;
-   const ERR_NO_ACCESS_TO_INSTANCE = 1;
+   const VERSION                   = '1.1.0';
+
+   const ERR_VBS_NOT_INITIALIZED    = 0;
+   const ERR_SB_NOT_EXIST           = 1;
+   const ERR_SB_NOT_ACTIVE          = 2;
+   const ERR_SB_USER_BANNED         = 3;
+   const ERR_OUTPUT_IS_EMPTY        = 4;
+   const ERR_NO_ROOM_AVAILABLE      = 5;
+   const ERR_ERROR_WHILE_FETCHING   = 6;
+   const ERR_SHOUT_NOT_EXIST        = 7;
+   const ERR_ERROR_WHILE_SAVING     = 8;
+   const ERR_INVALID_INSTANCE       = 9;
+   const ERR_NO_ACCESS_TO_INSTANCE  = 10;
+   const ERR_NO_INSTANCE_AVAILABLE  = 11;
+   const ERR_NO_ACCESS_TO_ROOM      = 12;
+   const ERR_LOGIN_ERROR_TRY_LATER  = 13;
+   const ERR_LOGIN_ERROR_WRONG_DATA = 14;
+   const ERR_LOGOUT_ERROR_BAD_TOKEN = 15;
+   const ERR_VB_USER_BANNED         = 16;
+   const ERR_VB_USER_NOT_EXIST      = 17;
 
 
    private static $_vb;
@@ -143,14 +164,15 @@ class VBS
    private static $_user;
 
    private static $_instance;
+   private static $_chatroom;
 
    private static $_chatrooms;
    private static $_instances;
 
    private static $_actual = false;
 
-   /*
-    TODO: Move code out
+
+   // TODO: Move code out
    // preInit
    // includes
    // GPC
@@ -158,21 +180,6 @@ class VBS
    // router
    // render
 
-   public static function preInit( $iId, $rId, $lastUpdate, $exit = false )
-   {
-       if(isset( $lastUpdate )){
-           (!$iId) && $iId = 1;
-           (!$rId) && $rId = 0;
-
-           if($lastUpdate && (self::getAop( $iId, $rId ) <= $lastUpdate+5 ) ){
-               if( $exit  )
-                   Output::render(  );
-
-               self::$_actual = true;
-           }
-       }
-   }
-   */
 
    public static function init( vB_Registry $vb )
    {
@@ -204,29 +211,166 @@ class VBS
       */
    }
 
+   public static function postInit( $instanceId, $roomId = 0 )
+   {
+      if ( empty(self::$_instances) )
+         Output::error( self::ERR_NO_INSTANCE_AVAILABLE );
+
+      $flag = false;
+      if ( $instanceId != 0 ) {
+         if ( !isset(self::$_instances[$instanceId]) )
+            Output::error( self::ERR_INVALID_INSTANCE );
+
+         self::$_instance = self::$_instances[$instanceId];
+
+         if ( !self::$_instance['permissions_parsed']['canviewshoutbox'] )
+            Output::error( self::ERR_NO_ACCESS_TO_INSTANCE );
+
+         $flag = true;
+      }
+      else { // We don't know instanceId so we select first instance that user can view
+         foreach ( self::$_instances as $instance ) {
+            if ( $instance['permissions_parsed']['canviewshoutbox'] ) {
+               self::$_instance = $instance;
+
+               $flag = true;
+            }
+         }
+      }
+
+      if ( $roomId ) {
+         self::$_chatroom = isset(self::$_chatrooms[$roomId]) ? self::$_chatrooms[$roomId] : null;
+
+         if ( is_null( self::$_chatroom ) || !self::isAccessible( self::$_chatroom ) || !self::$_chatroom['active'] )
+            Output::error( self::ERR_NO_ACCESS_TO_ROOM );
+      }
+
+      // If user can't view any instance, we throw error :P
+      if ( !$flag )
+       Output::error( self::ERR_NO_INSTANCE_AVAILABLE );
+
+
+
+      /*// select first instance
+            foreach ( self::$_instances as $instance ) {
+               self::$_instance   = $instance;
+               self::$_instanceid = $instance['instanceid'];
+
+               return true;
+            }
+      */
+   }
+
+   public static function isAccessible( array $what, array $user = array() )
+   {
+      if ( empty($user) )
+         $user = & self::$_user;
+
+      if ( !isset($user['membergroupids']) )
+         return false;
+
+      if ( !isset($what['membergroupids']) )
+         return isset($what['members'][$user['userid']]);
+
+      return (bool)array_intersect( explode( ',', $user['usergroupid'] . ',' . $user['membergroupids'] ), explode( ',', $what['membergroupids'] ) );
+   }
+
+   public static function isInSync( $lastUpdate = null, $instanceId = null, $chatroomId = null, $exit = false )
+   {
+      if ( is_null( $lastUpdate ) ) {
+         $lastUpdate = (int)self::$_gpc['lastupdate'];
+         $instanceId = self::getInstanceId();
+         $chatroomId = self::getChatRoomId();
+      }
+
+      if ( isset($lastUpdate) ) {
+         !$instanceId && $instanceId = 1;
+         !$chatroomId && $chatroomId = 0;
+
+         if ( $lastUpdate && (self::getAop( $instanceId, $chatroomId ) <= $lastUpdate + 5) ) {
+            if ( $exit )
+               Output::render();
+
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   public static function getAop( $instanceId = null, $chatroomId = null, $marked = true )
+   {
+      if ( is_null( $instanceId ) ) {
+         $instanceId = self::getInstanceId();
+         $chatroomId = self::getChatRoomId();
+      }
+
+      if ( strlen( $instanceId ) )
+         $instanceId = (int)$instanceId;
+      $chatroomId = (int)$chatroomId;
+
+      $path = DIR . '/dbtech/vbshout/aop/';
+      $marked && $path .= 'markread-';
+
+      $tab = ((!$chatroomId) ? 'shouts' . $instanceId : "chatroom_{$chatroomId}_{$instanceId}") . '.txt';
+
+      $t = intval( @file_get_contents( $path . $tab ) );
+
+      if ( strlen( $instanceId ) )
+         return $t;
+
+      // if it is main chatroom filename can be with or without "0", so second check fo filename with 0
+      $t2 = self::getAop( 0, $chatroomId, $marked );
+
+      return max( $t, $t2 );
+   }
+
+   public static function getInstanceId( )
+   {
+      if( !self::$_instance )
+         return null;
+
+      return self::$_instance['instanceid'];
+   }
+
+   public static function getChatRoomId( )
+   {
+      if( !self::$_chatroom )
+         return 0;
+
+      return self::$_chatroom['chatroomid'];
+   }
+
    public static function getInstanceInfo()
    {
       // $tmp['description'] = strip_tags( self::$_instance['description'] );
-      //TODO: optimize array keys length
-      $tmp                   = array();
-      $tmp['id']             = (int)self::$_instance['instanceid'];
-      $tmp['active']         = (bool)self::$_instance['active'];
-      $tmp['name']           = Output::encode( strip_tags( self::$_instance['name'] ) );
-      $tmp['maxshouts']      = (int)self::$_instance['options']['maxshouts'];
-      $tmp['floodchecktime'] = (int)self::$_instance['options']['floodchecktime'];
-      $tmp['maxchars']       = (int)self::$_instance['options']['maxchars'];
-      $tmp['maximages']      = (int)self::$_instance['options']['maximages'];
-      $tmp['idletimeout']    = (int)self::$_instance['options']['idletimeout'];
-      $tmp['refresh']        = (int)self::$_instance['options']['refresh'];
-      $tmp['enablepms']      = (bool)self::$_instance['options']['enablepms'];
-      $tmp['enablepmnotifs'] = (bool)self::$_instance['options']['enablepmnotifs'];
-      $tmp['enablesysmsg']   = (bool)self::$_instance['options']['enable_sysmsg'];
 
-      return $tmp;
+      if ( is_null( self::getInstanceId() ) )
+         return null;
+
+      //TODO: optimize array keys length
+      $info                   = array();
+      $info['id']             = (int)self::$_instance['instanceid'];
+      $info['active']         = (bool)self::$_instance['active'];
+      $info['name']           = Output::encode( strip_tags( self::$_instance['name'] ) );
+      $info['maxshouts']      = (int)self::$_instance['options']['maxshouts'];
+      $info['floodchecktime'] = (int)self::$_instance['options']['floodchecktime'];
+      $info['maxchars']       = (int)self::$_instance['options']['maxchars'];
+      $info['maximages']      = (int)self::$_instance['options']['maximages'];
+      $info['idletimeout']    = (int)self::$_instance['options']['idletimeout'];
+      $info['refresh']        = (int)self::$_instance['options']['refresh'];
+      $info['enablepms']      = (bool)self::$_instance['options']['enablepms'];
+      $info['enablepmnotifs'] = (bool)self::$_instance['options']['enablepmnotifs'];
+      $info['enablesysmsg']   = (bool)self::$_instance['options']['enable_sysmsg'];
+
+      return $info;
    }
 
    public static function getUserInfo()
    {
+      if( !self::$_user )
+         return null;
+
       //$user['lang'] = self::$_user['lang_code']; TODO: Delete this in apk
       $user                 = array();
       $user['userid']       = (int)self::$_user['userid'];
@@ -267,7 +411,7 @@ class VBS
 
       if ( !empty(self::$_chatrooms) ) {
          foreach ( self::$_chatrooms as $room )
-            if ( $room['active'] && self::canAccess( $room ) )
+            if ( $room['active'] && self::isAccessible( $room ) )
                $rList[] = array(
                   'rid'    => (int)$room['chatroomid'],
                   'iid'    => (int)$iId = ($room['instanceid'] ? : self::$_instance['instanceid']),
@@ -278,51 +422,16 @@ class VBS
 
       }
 
-      return $rList;
+      return $rList? $rList : null;
    }
 
-   public static function getAop( $iId, $rId, $marked = true )
+   public static function getShoutList( $limit = null )
    {
-      if ( strlen( $iId ) )
-         $iId = (int)$iId;
-      $rId = (int)$rId;
-
-      $path = DIR . '/dbtech/vbshout/aop/';
-      $marked && $path .= 'markread-';
-
-      $tab = ((!$rId) ? 'shouts' . $iId : "chatroom_{$rId}_{$iId}") . '.txt';
-
-      $t = intval( @file_get_contents( $path . $tab ) );
-
-      if ( strlen( $iId ) )
-         return $t;
-
-      // if it is main chatroom filename can be with or without "0", so second check fo filename with 0
-      $t2 = self::getAop( 0, $rId, $marked );
-
-      return max( $t, $t2 );
-   }
-
-   public static function canAccess( array $where, array $user = array() )
-   {
-      if ( empty($user) )
-         $user = & self::$_user;
-
-      if ( !isset($user['membergroupids']) )
+      if ( is_null( self::getInstanceId() ) )
          return false;
 
-      if ( !isset($where['membergroupids']) )
-         return isset($where['members'][$user['userid']]);
-
-      return (bool)array_intersect( explode( ',', $user['usergroupid'] . ',' . $user['membergroupids'] ), explode( ',', $where['membergroupids'] ) );
-   }
-
-   public static function getShoutList( $num = null )
-   {
-      if ( !self::$_instance && (!self::$_instance = self::_getInstance()) )
-         return false;
-      if ( !self::$_instance['permissions_parsed']['canviewshoutbox'] )
-         Output::error( self::ERR_NO_ACCESS_TO_INSTANCE );
+//      if ( !self::$_instance['permissions_parsed']['canviewshoutbox'] )
+//         Output::error( self::ERR_NO_ACCESS_TO_INSTANCE );
 
       $fetchQ = self::$_vb->db->query_read_slave( "
       SELECT
@@ -349,15 +458,15 @@ class VBS
                                                   ) . "
       LEFT JOIN " . TABLE_PREFIX . "user AS pmuser ON(pmuser.userid = vbshout.id)
       WHERE
-        vbshout.instanceid IN(-1, 0, " . intval( self::$_instance['instanceid'] ) . ")
+        vbshout.instanceid IN(-1, 0, " . intval( self::getInstanceId() ) . ")
         AND vbshout.userid NOT IN(
           SELECT ignoreuserid
           FROM " . TABLE_PREFIX . "dbtech_vbshout_ignorelist AS ignorelist
           WHERE userid = " . self::$_user['userid'] . "
         )
-        AND vbshout.chatroomid = " . intval( self::$_chatroomid )
+        AND vbshout.chatroomid = " . intval( self::getChatRoomId() )
 
-                                                  . (is_null( $num ) ? " AND vbshout.dateline > " . (self::$_vb->GPC['lastupdate']) : '') .
+                                                  . (is_null( $limit ) ? " AND vbshout.dateline > " . (self::$_vb->GPC['lastupdate']) : '') .
 
                                                   ' AND (
                                                      vbshout.userid IN(-1, ' . self::$_user['userid'] . ') OR
@@ -370,17 +479,15 @@ class VBS
 		AND userid != ' . self::$_user['userid'] . '
 )
       ORDER BY shoutid DESC
-      LIMIT ' . ($num ? $num : 100)
+      LIMIT ' . ($limit ? $limit : 100)
       );
 
       if ( !self::$_vb->db->num_rows( $fetchQ ) )
          return null;
 
-
-
-      $list = array();
       require(DIR . '/includes/html_color_names.php');
 
+      $list = array();
       while ( $shout = self::$_vb->db->fetch_array( $fetchQ ) ) {
          VBSHOUT::parse_action_codes( $shout['message_raw'], $shout['type'] );
 
@@ -393,16 +500,16 @@ class VBS
          $nShout             = array();
          $nShout['shoutid']  = (int)$shout['shoutid'];
          $nShout['time']     = (int)$shout['dateline'];
-         $nShout['msg']      = trim( Output::encode( $shout['message_raw'] ) );
+         $nShout['msg']      = trim( $shout['message_raw'] );
          $nShout['userid']   = (int)$shout['userid'];
-         $nShout['username'] = Output::encode( $shout['username'] );
+         $nShout['username'] = $shout['username'];
          $nShout['uban']     = (bool)$shout['banned'];
          $nShout['ucolor']   = preg_match( '/[=\'"; ]color[=:"\']+([ a-zA-Z0-9\#]+)[;\'"\]]+/is', $shout['opentag'], $m ) ? ((substr( $color = trim( $m[1] ), 0, 1 ) != '#') ? (isset($html_color_names[strtolower( $color )]) ? '#' . $html_color_names[strtolower( $color )] : '') : $color) : '';
          $nShout['ubold']    = (bool)((stripos( $shout['opentag'], '<b>' ) !== false) || (stripos( $shout['opentag'], 'strong' ) !== false) || (stripos( $shout['opentag'], 'bold' ) !== false));
          $nShout['uitalic']  = (bool)((stripos( $shout['opentag'], '<i>' ) !== false) || (stripos( $shout['opentag'], 'italic' ) !== false));
 
          $nShout['pm_uid']   = (int)$shout['id'];
-         $nShout['pm_uname'] = Output::encode( $shout['pmusername'] );
+         $nShout['pm_uname'] = $shout['pmusername'];
 
          $nShout['canban']  = (bool)(($shout['userid'] != self::$_user['userid']) && (self::$_instance['permissions_parsed']['canban']) && (!VBSHOUT::check_protected_usergroup( $shout, true )));
          $nShout['canpm']   = (bool)((self::$_instance['permissions_parsed']['canpm']) && ($shout['userid'] > -1) && ($shout['userid'] != self::$_user['userid']));
@@ -443,7 +550,7 @@ class VBS
                else
                   $nShout['type'] = 'system';
 
-               $nShout['msg'] = Output::encode( strip_tags( $shout['message'] ) );
+               $nShout['msg'] = strip_tags( $shout['message'] );
                break;
 
             default:
@@ -453,10 +560,10 @@ class VBS
          if ( $shout['userid'] == -1 )
             $nShout['type'] = 'system';
 
-         ///////////////////////////////////////
-         // $nShout['message'] = $nShout['msg'];
-         ///////////////////////////////////////
 
+         $nShout['msg']      = Output::encode( $shout['msg'] );
+         $nShout['username'] = Output::encode( $shout['username'] );
+         $nShout['pm_uname'] = Output::encode( $shout['pm_uname'] );
 
          $list[] = $nShout;
          unset($nShout);
@@ -468,12 +575,94 @@ class VBS
 
    public static function devInfo()
    {
-      Output::output( 'VBVersion', self::$_vb->versionnumber );
+      Output::output( 'VBVersion',  self::$_vb->versionnumber );
       Output::output( 'VBSVersion', self::VERSION );
-      Output::output( 'version', VBSHOUT::$version );
-      Output::output( 'versionNo', VBSHOUT::$versionnumber );
-      Output::output( 'isPro', VBSHOUT::$isPro );
+      Output::output( 'version',    VBSHOUT::$version );
+      Output::output( 'versionNo',  VBSHOUT::$versionnumber );
+      Output::output( 'isPro',      VBSHOUT::$isPro );
 
       Output::render();
    }
+
+   public static function shoutSync()
+   {
+      if ( is_null( self::getInstanceId() ) )
+         Output::error( self::ERR_VBS_NOT_INITIALIZED );
+
+      Output::output( 'lastSync', self::getAop() ); //TODO: change "lastup" to lastSync in apk
+
+      $tmp = self::getShoutList();
+
+      if ( is_null( $tmp ) )
+         return;
+      elseif ( !$tmp )
+         Output::error( self::ERR_ERROR_WHILE_FETCHING );
+      else
+         Output::output( 'shouts', $tmp );
+   }
+
+   public static function shoutReSync()
+   {
+      if ( is_null( self::getInstanceId() ) )
+         Output::error( self::ERR_VBS_NOT_INITIALIZED );
+
+      Output::output( 'lastReSync', self::getAop() ); //TODO: change "lastbu" to lastReSync in apk
+
+      self::instanceInfo();
+
+      if ( self::isInSync() )
+         return;
+
+      $limit = self::$_gpc['fetchcount'];
+      $list  = self::getShoutList( $limit ? $limit : 10 );
+
+      if ( is_null( $list ) )
+         return;
+
+      if ( empty($list) )
+         Output::error( self::ERR_ERROR_WHILE_FETCHING );
+      else
+         Output::output( 'shouts', $list );
+   }
+
+   public static function roomSync()
+   {
+      if ( is_null( self::getInstanceId() ) )
+         Output::error( self::ERR_VBS_NOT_INITIALIZED );
+
+      $list = self::getRoomList();
+
+      if ( is_null( $list ) )
+         Output::error( self::ERR_NO_ROOM_AVAILABLE );
+
+      Output::output( 'rooms', $list );
+   }
+
+   public static function userInfo()
+   {
+      if ( is_null( self::getInstanceId() ) )
+         Output::error( self::ERR_VBS_NOT_INITIALIZED );
+
+      $info = self::getUserInfo();
+      if ( is_null( $info ) )
+         Output::error( self::ERR_VB_USER_NOT_EXIST );
+
+      Output::output( 'user', $info );
+
+      Output::output( 'return', (bool)$info['userid'] );
+   }
+
+   public static function instanceInfo()
+   {
+      if ( is_null( self::getInstanceId() ) )
+         Output::error( self::ERR_VBS_NOT_INITIALIZED );
+
+      Output::output( 'instance', self::getInstanceInfo() );
+
+      self::userInfo();
+      self::roomSync();
+
+      Output::output( 'return', (bool)self::$_instance['permissions_parsed']['canviewshoutbox'] );
+   }
+
 }

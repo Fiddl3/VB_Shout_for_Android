@@ -144,41 +144,41 @@ class VBSold
       exit;
    }
 
-   public static function setInstance( $iid = null )
+   public static function setInstance( $instanceId = null )
    {
-      if ( $iid != 0 ) {
-         if ( !self::$_instance = self::_getInstance( $iid ) )
-            self::error( 9, 'invalid-instance-' . $iid );
-         //elseif ( !self::$_instance['permissions_parsed']['canviewshoutbox'] )
-         //  self::error( 10, 'no-access-to-instance-'. $iid );
-         else
-            return (bool)(self::$_instanceid = $iid);
-      }
 
-      if ( empty(self::$_instances) ) {
+      if ( empty(self::$_instances) )
          self::error( 11, 'no-instance-available' );
 
-         return false;
+
+      if ( $instanceId != 0 ) {
+         if( isset(self::$_instances[$instanceId]) )
+            self::$_instance = self::$_instances[$instanceId];
+         else
+            self::error( 9, 'invalid-instance-' . $instanceId );
+
+          return true;
       }
+      else { // We don't know instanceId so we select first instance that user can view
+         foreach ( self::$_instances as $instance ) {
+            if ( $instance['permissions_parsed']['canviewshoutbox'] ) {
+               self::$_instance   = $instance;
 
-      foreach ( self::$_instances as $instance ) {
-         if ( $instance['permissions_parsed']['canviewshoutbox'] ) {
-            self::$_instance   = $instance;
-            self::$_instanceid = $instance['instanceid'];
-
-            return true;
+               return true;
+            }
          }
       }
 
-
-
+      // If user can't view any instance, we throw error :P
+      self::error( 11, 'no-instance-available' );
+/*
       foreach ( self::$_instances as $instance ) {
          self::$_instance   = $instance;
          self::$_instanceid = $instance['instanceid'];
 
          return true;
       }
-
+*/
       return false;
    }
 
@@ -190,20 +190,16 @@ class VBSold
       return isset(self::$_instances[$iid]) ? self::$_instances[$iid] : null;
    }
 
-   public static function setChatroom( $rid )
+   public static function setChatroom( $roomId )
    {
-      if ( $rid == 0 ) {
-         self::$_chatroomid = $rid;
+      if( !$roomId ) return true;
 
-         return true;
-      }
 
-      $room = self::_getChatroom( $rid );
+      $room = isset(self::$_chatrooms[$roomId]) ? self::$_chatrooms[$roomId] : null;
 
       if ( is_null( $room ) || !self::canAccess( $room ) || !$room['active'] )
-         self::error( 12, 'no-access-to-room-' . $rid );
+         self::error( 12, 'no-access-to-room-' . $roomId );
 
-      self::$_chatroomid = $rid;
 
       return true;
    }
@@ -313,6 +309,7 @@ class VBSold
 
    public static function fetchShouts( $num = null )
    {
+
       if ( !self::$_instance && (!self::$_instance = self::_getInstance()) )
          return false;
       if ( !self::$_instance['permissions_parsed']['canviewshoutbox'] )
@@ -467,6 +464,15 @@ class VBSold
       return array_reverse( $list );
    }
 
+   public static function info( $text, $code = 0 )
+   {
+      $info = array('code' => $code, 'msg' => self::encode( $text ));
+      if ( !empty(self::$_output['info']) )
+         self::$_output['info'][] = $info;
+      else
+         self::$_output['info'][0] = $info;
+   }
+
    public static function saveShout_()
    {
       $type = (VBSHOUT::$shouttypes[self::$_vb->GPC['type']] ? self::$_vb->GPC['type'] : 'shout');
@@ -514,15 +520,6 @@ class VBSold
 
       self::info( 'saving-success', 2 );
       self::output( 'return', true );
-   }
-
-   public static function info( $text, $code = 0 )
-   {
-      $info = array('code' => $code, 'msg' => self::encode( $text ));
-      if ( !empty(self::$_output['info']) )
-         self::$_output['info'][] = $info;
-      else
-         self::$_output['info'][0] = $info;
    }
 
    public static function deleteShout_()
